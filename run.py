@@ -34,12 +34,14 @@ print('Jax is using', default_backend())
 
 # ~~~ SET UP CONFIGURATION ~~~
 trial = 0
-seed = 1996
+seed = 5423
 # targetdim = (32, 32)
-targetdim = (640, 640)
+targetdim = (768, 768)
+# targetdim = (512, 512)
 depth = 8
-ptcl_spacing = 10.
+ptcl_spacing = 6
 Niters = 200
+mesh_shape = 1
 
 wdir = '/ocean/projects/phy240015p/mho1/borgnyc'
 odir = join(wdir, f'trial{trial}')
@@ -67,8 +69,7 @@ xmax, ymax = xmin+512, ymin+512
 image = image.crop((xmin, ymin, xmax, ymax))
 
 # add black space to the edges
-targetdim = (640, 640)
-new_im = Image.new("L", targetdim)
+new_im = Image.new("L", (640, 640))
 new_im.paste(image, (64, 64))
 image = new_im
 
@@ -89,18 +90,19 @@ plt.close(f)
 # ~~~ SET UP PMWD ~~~
 print('Setting up PMWD...')
 ptcl_grid_shape = (*targetdim, depth)
-mesh_shape = (*targetdim, depth)
 
 # normalize the image to make the target
 im_tgt = image / 255
 im_tgt *= jnp.prod(jnp.array(ptcl_grid_shape)) / im_tgt.sum()
 
 # set up grid
-conf = Configuration(ptcl_spacing, ptcl_grid_shape, mesh_shape)
+conf = Configuration(
+    ptcl_spacing, ptcl_grid_shape, mesh_shape=mesh_shape)
 cosmo = SimpleLCDM(conf)
 seed = 0
 modes = white_noise(seed, conf, real=True)
 cosmo = boltzmann(cosmo, conf)
+print(conf)
 
 
 # ~~~ SET UP FUNCTIONS ~~~
@@ -116,8 +118,9 @@ def model(modes, cosmo, conf):
 
 
 def scatter_2d(ptcl, conf):
-    dens = jnp.zeros(tuple(s for s in conf.mesh_shape), dtype=conf.float_dtype)
-    dens = scatter(ptcl, conf, mesh=dens, val=1, cell_size=conf.cell_size / 2)
+    dens = jnp.zeros(
+        tuple(s//mesh_shape for s in conf.mesh_shape), dtype=conf.float_dtype)
+    dens = scatter(ptcl, conf, mesh=dens, val=1, cell_size=conf.cell_size)
     return dens.sum(axis=2)
 
 
