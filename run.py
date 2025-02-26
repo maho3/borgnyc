@@ -17,6 +17,7 @@ from pmwd import (
     nbody,
     scatter,
 )
+from pmwd.nbody import nbody_init, nbody_step
 
 from PIL import Image
 from os.path import join
@@ -34,13 +35,13 @@ print('Jax is using', default_backend())
 
 # ~~~ SET UP CONFIGURATION ~~~
 trial = 0
-seed = 5423
+seed = 1953
 # targetdim = (32, 32)
-targetdim = (768, 768)
-# targetdim = (512, 512)
+# targetdim = (768, 768)
+targetdim = (640, 640)
 depth = 8
-ptcl_spacing = 6
-Niters = 200
+ptcl_spacing = 8
+Niters = 20
 mesh_shape = 1
 
 wdir = '/ocean/projects/phy240015p/mho1/borgnyc'
@@ -117,6 +118,21 @@ def model(modes, cosmo, conf):
     return ptcl, dens
 
 
+def model_time(modes, cosmo, conf):
+    modes = linear_modes(modes, cosmo, conf)
+    ptcl, obsvbl = lpt(modes, cosmo, conf)
+
+    a_nbody = conf.a_nbody
+
+    ptcl, obsvbl = nbody_init(a_nbody[0], ptcl, obsvbl, cosmo, conf)
+    denses = []
+    for a_prev, a_next in zip(a_nbody[:-1], a_nbody[1:]):
+        ptcl, obsvbl = nbody_step(a_prev, a_next, ptcl, obsvbl, cosmo, conf)
+        dens = scatter_2d(ptcl, conf)
+        denses.append(dens)
+    return denses
+
+
 def scatter_2d(ptcl, conf):
     dens = jnp.zeros(
         tuple(s//mesh_shape for s in conf.mesh_shape), dtype=conf.float_dtype)
@@ -126,7 +142,9 @@ def scatter_2d(ptcl, conf):
 
 def obj(tgt, modes, cosmo, conf):
     _, dens = model(modes, cosmo, conf)
-    return (dens - tgt).var() / tgt.var()
+    likelihood = (dens - tgt).var() / tgt.var()
+    prior = modes.var()
+    return likelihood + prior
 
 
 obj_valgrad = jax.value_and_grad(obj, argnums=1)
@@ -177,5 +195,12 @@ ax.imshow(rho, cmap='gray')
 ax.axis('off')
 f.savefig(join(odir, 'rho.jpg'), bbox_inches='tight', pad_inches=0)
 
+
+# Save the time series
+print('Saving time series...')
+denses = model_time(modes_optim, cosmo, conf)
+for i, dens in enumerate(denses):
+    opath = join(odir, f'dens_{i}.npy')
+    np.save(opath, np.array(dens))
 
 print('Done in', (time.time() - t0)/60, 'm')
